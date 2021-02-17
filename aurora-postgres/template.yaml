@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation Template to create Aurora Postgresql Cluster DB Instance'
+
+Parameters:
+  EnvName:
+    Type: String
+    Description: A resusable descriptor value of alpha-numerics
+    Default: aws-cloud-env
+    AllowedPattern: '[a-zA-Z\-]+'
+  DatabaseName:
+    Description: The name of the first database to be created when the cluster is created
+    Type: String
+    Default: dev
+    AllowedPattern: "([a-z]|[0-9])+"
+  MasterUsername:
+    Description: The user name that is associated with the master user account for
+      the cluster that is being created
+    Type: String
+    Default: devuser
+    AllowedPattern: "([a-z])([a-z]|[0-9])*"
+  MasterUserPassword:
+    Description: The password that is associated with the master user account for
+      the cluster that is being created.
+    Type: String
+    NoEcho: 'true'
+  DatabaseEngineVersion:
+    Type: String
+    Default: 11.9
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t3.medium
+
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet Group for Aurora Postgres DB
+      DBSubnetGroupName: !Sub "${AWS::StackName}-subnet-group"
+      SubnetIds:
+        - {'Fn::ImportValue': !Sub '${EnvName}-simple-vpc-public-subnet-1'}
+        - {'Fn::ImportValue': !Sub '${EnvName}-simple-vpc-public-subnet-2'}
+
+  AuroraS3ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - rds.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  AuroraPostgresCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: !Ref DatabaseEngineVersion
+      Port: 5432
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      AssociatedRoles:
+        - FeatureName: s3Export
+          RoleArn: !GetAtt AuroraS3ServiceRole.Arn
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        - {'Fn::ImportValue': !Sub '${EnvName}-postgres-sg'}
+      DBClusterParameterGroupName: default.aurora-postgresql11
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+  AuroraPostgresInstanceOne:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBClusterIdentifier: !Ref AuroraPostgresCluster
+      Engine: aurora-postgresql
+      EngineVersion: !Ref DatabaseEngineVersion
+      AutoMinorVersionUpgrade: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: true
+
+
+Outputs:
+  ClusterEndpoint:
+    Description: The read/write endpoint for the cluster
+    Value: !GetAtt AuroraPostgresCluster.Endpoint.Address
+  ClusterReaderEndpoint:
+    Description: The read only endpoint for the cluster
+    Value: !GetAtt AuroraPostgresCluster.ReadEndpoint.Address
+  PSQLCommandLine:    
+    Description: PSQL Command Line
+    Value: !Join
+             - ''
+             - - 'psql --host='
+               - !GetAtt 'AuroraPostgresCluster.Endpoint.Address' 
+               - ' --port='
+               - !GetAtt 'AuroraPostgresCluster.Endpoint.Port'
+               - ' --username='
+               - !Ref MasterUsername
+               - ' --dbname='
+               - !Ref DatabaseName

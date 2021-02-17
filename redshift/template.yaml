@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  EnvName:
+    Type: String
+    Description: A resusable descriptor value of alpha-numerics
+    Default: aws-cloud-env
+    AllowedPattern: '[a-zA-Z\-]+'
+  DatabaseName:
+    Description: The name of the first database to be created when the cluster is created
+    Type: String
+    Default: dev
+    AllowedPattern: "([a-z]|[0-9])+"
+  MasterUsername:
+    Description: The user name that is associated with the master user account for
+      the cluster that is being created
+    Type: String
+    Default: devuser
+    AllowedPattern: "([a-z])([a-z]|[0-9])*"
+  MasterUserPassword:
+    Description: The password that is associated with the master user account for
+      the cluster that is being created.
+    Type: String
+    NoEcho: 'true'
+  ClusterType:
+    Description: The type of cluster
+    Type: String
+    Default: single-node
+    AllowedValues:
+      - single-node
+      - multi-node
+  NumberOfNodes:
+    Description: The number of compute nodes in the cluster. For multi-node clusters,
+      the NumberOfNodes parameter must be greater than 1
+    Type: Number
+    Default: '1'
+  NodeType:
+    Description: The type of node to be provisioned
+    Type: String
+    Default: ds2.xlarge
+    AllowedValues:
+      - ds2.xlarge
+      - ds2.8xlarge
+      - dc1.large
+      - dc1.8xlarge
+
+Conditions:
+  IsMultiNodeCluster:
+    Fn::Equals:
+    - Ref: ClusterType
+    - multi-node
+
+Resources:
+  RedshiftCluster:
+    Type: AWS::Redshift::Cluster
+    Properties:
+      ClusterType: !Ref ClusterType
+      NumberOfNodes:
+        Fn::If:
+        - IsMultiNodeCluster
+        - Ref: NumberOfNodes
+        - Ref: AWS::NoValue
+      NodeType: !Ref NodeType
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      ClusterParameterGroupName: !Ref RedshiftClusterParameterGroup
+      VpcSecurityGroupIds:
+        - {'Fn::ImportValue': !Sub '${EnvName}-redshift-sg'}
+      IamRoles:
+       - !GetAtt RedShiftServiceRole.Arn
+      ClusterSubnetGroupName: !Ref RedshiftClusterSubnetGroup
+      PubliclyAccessible: 'true'
+      Port: 5439
+  RedshiftClusterParameterGroup:
+    Type: AWS::Redshift::ClusterParameterGroup
+    Properties:
+      Description: Cluster parameter group
+      ParameterGroupFamily: redshift-1.0
+      Parameters:
+      - ParameterName: enable_user_activity_logging
+        ParameterValue: 'true'
+  RedshiftClusterSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: Redshift Cluster subnet group
+      SubnetIds:
+        - {'Fn::ImportValue': !Sub '${EnvName}-simple-vpc-public-subnet-1'}
+        - {'Fn::ImportValue': !Sub '${EnvName}-simple-vpc-public-subnet-2'}
+
+  RedShiftServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - redshift.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRedshiftFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+
+
+Outputs:
+  ClusterEndpoint:
+    Description: Cluster endpoint
+    Value: !Sub "${RedshiftCluster.Endpoint.Address}:${RedshiftCluster.Endpoint.Port}"
+  ClusterName:
+    Description: Name of cluster
+    Value: !Ref RedshiftCluster
+  ParameterGroupName:
+    Description: Name of parameter group
+    Value: !Ref RedshiftClusterParameterGroup
+  RedshiftClusterSubnetGroupName:
+    Description: Name of cluster subnet group
+    Value: !Ref RedshiftClusterSubnetGroup
+  RedShiftServiceRole:
+    Description: The service role for the Red Shift Cluster
+    Value: !GetAtt RedShiftServiceRole.Arn
+

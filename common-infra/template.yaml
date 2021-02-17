@@ -1,0 +1,352 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description:  This template deploys a VPC, with a public and private subnet 
+  in a two Availability Zones for simple isolated development environments. 
+  It deploys an internet gateway, with a default route on the public subnet.
+  It deploys a NAT gateway and default route for it in the private subnet.
+
+Parameters:
+  EnvName:
+    Type: String
+    Description: A resusable descriptor value of alpha-numerics
+    Default: aws-cloud-env
+    AllowedPattern: '[a-zA-Z\-]+'
+
+  VpcCIDR:
+    Description: Enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.192.0.0/16 # 10.192.0.1 --> 10.192.255.254 (65,536 addresses)
+
+  InboundTraffic:
+    Description: Allow inbound traffic to the cluster from this CIDR range.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+
+  PublicSubnetOneCIDR:
+    Description: Enter the IP range (CIDR notation) for the public subnet within the first AZ
+    Type: String
+    Default: 10.192.10.0/24 # 10.192.10.1 --> 10.192.10.254 (256 addresses)
+
+  PublicSubnetTwoCIDR:
+    Description: Enter the IP range (CIDR notation) for the second public subnet within the second AZ
+    Type: String
+    Default: 10.192.40.0/24 # 10.192.40.1 --> 10.192.40.254 (256 addresses)
+
+  PrivateSubnetOneCIDR:
+    Description: Enter the IP range (CIDR notation) for the private subnet within the First AZ
+    Type: String
+    Default: 10.192.20.0/24 # 10.192.20.1 --> 10.192.20.254 (256 addresses)
+
+  PrivateSubnetTwoCIDR:
+    Description: Enter the IP range (CIDR notation) for the private subnet within the Second AZ
+    Type: String
+    Default: 10.192.30.0/24 # 10.192.30.1 --> 10.192.30.254 (256 addresses)
+
+
+Resources:
+  EtlStagingS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+
+  DataLakeS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvName}-ig"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnetOneCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Public Subnet (AZ)
+
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnetTwoCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Second Public Subnet (AZ)
+
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnetOneCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Private Subnet (AZ-1)
+
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnetTwoCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Private Subnet (AZ-2)
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Public Routes
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetOne
+
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetTwo
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvName} Private Routes
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetOne
+
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetTwo
+
+  NoIngressSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvName}-no-ingress-sg
+      GroupDescription: "Security group with no ingress rule but, still useful for enabling communication between instances"
+      VpcId: !Ref VPC
+
+  SshPingWithinVpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvName}-ssh-icmp-vpc-only
+      GroupDescription: "Allows for SSH and ping connections between instances within VPC"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref NoIngressSecurityGroup
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          SourceSecurityGroupId: !Ref NoIngressSecurityGroup
+
+  PostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvName}-postgres-vpc-only
+      GroupDescription: "Allows for Postgres standard port commounication within VPC"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: !Ref InboundTraffic
+          FromPort: 5432
+          ToPort: 5432
+          # SourceSecurityGroupId: !Ref NoIngressSecurityGroup
+
+  RedShiftSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvName}-redshift-vpc-only
+      GroupDescription: "Allows for Redshift standard port commounication within VPC"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: !Ref InboundTraffic
+          FromPort: 5439
+          ToPort: 5439
+          # SourceSecurityGroupId: !Ref NoIngressSecurityGroup
+
+  WebVpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvName}-http-https-all
+      GroupDescription: "Allows for HTTP and HTTPS traffic from anywhere"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: 
+              - "s3:*"
+            Resource:
+              - "*"
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref VPC
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc"
+
+  PublicSubnetOne:
+    Description: A reference to the public subnet in the first AZ
+    Value: !Ref PublicSubnetOne
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-public-subnet-1"
+
+  PublicSubnetTwo:
+    Description: A reference to the second public subnet in the second AZ
+    Value: !Ref PublicSubnetTwo
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-public-subnet-2"
+
+  PrivateSubnetOne:
+    Description: A reference to the private subnet in the First Availability Zone
+    Value: !Ref PrivateSubnetOne
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-private-subnet-1"
+
+  PrivateSubnetTwo:
+    Description: A reference to the private subnet in the Second Availability Zone
+    Value: !Ref PrivateSubnetTwo
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-private-subnet-2"
+
+  NoIngressSecurityGroup:
+    Description: Security group with no ingress rule
+    Value: !Ref NoIngressSecurityGroup
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-no-ingress-sg"
+
+  SshPingWithinVpcSecurityGroup:
+    Description: Security group allowing SSH and ICMP within the VPC between Instances
+    Value: !Ref SshPingWithinVpcSecurityGroup
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-ssh-icmp-sg"
+
+  WebVpcSecurityGroup:
+    Description: Security group allowing HTTP/HTTPS traffic
+    Value: !Ref WebVpcSecurityGroup
+    Export:
+      Name: !Sub "${EnvName}-simple-vpc-http-https-sg"
+
+  PostgresSecurityGroup:
+    Description: Security group allowing Postgres standard port access within VPC
+    Value: !Ref PostgresSecurityGroup
+    Export:
+      Name: !Sub "${EnvName}-postgres-sg"
+
+  RedShiftSecurityGroup:
+    Description: Security group for Red Shift Data Warehouse
+    Value: !Ref RedShiftSecurityGroup
+    Export:
+      Name: !Sub "${EnvName}-redshift-sg"
+
+  S3VpcEndpoint:
+    Description: VPC Endpint for S3
+    Value: !Ref S3VpcEndpoint
+    Export:
+      Name: !Sub "${EnvName}-s3-vpc-endpoint"
+
+  EtlStagingS3Bucket:
+    Description: Bucket for holding ETL data files
+    Value: !GetAtt EtlStagingS3Bucket.Arn
+    Export:
+      Name: !Sub ${EnvName}-etl-staging-bucket
+
+  DataLakeS3Bucket:
+    Description: Bucket to serve as S3 Data Lake
+    Value: !GetAtt DataLakeS3Bucket.Arn
+    Export:
+      Name: !Sub ${EnvName}-s3-datalake-bucket

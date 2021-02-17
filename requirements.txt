@@ -1,0 +1,7 @@
+jupyter
+ipython-sql
+pandas
+RISE
+psycopg2-binary
+python-dotenv
+
