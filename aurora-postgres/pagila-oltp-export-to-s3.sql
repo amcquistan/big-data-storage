@@ -32,9 +32,10 @@ AS $$
                   p.staff_id, 
                   TO_CHAR(payment_date, 'yyyymmdd')::INT AS date_id, 
                   p.amount
-            FROM oltp.payment p 
+            FROM oltp.payment p
                 JOIN oltp.rental r ON p.rental_id = r.rental_id
-                JOIN oltp.inventory i ON r.inventory_id = i.inventory_id;
+                JOIN oltp.inventory i ON r.inventory_id = i.inventory_id
+            ORDER BY date_id, i.film_id;
 END; $$;
 
 DROP FUNCTION IF EXISTS oltp.get_date_dim;
@@ -63,14 +64,14 @@ AS $$
 END; $$;
 
 DROP PROCEDURE IF EXISTS oltp.export_s3_staging_tables;
-CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR DEFAULT :s3_bucket, aws_region VARCHAR DEFAULT :aws_region)
+CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR, aws_region VARCHAR)
   LANGUAGE plpgsql
   AS $$
   BEGIN
     RAISE NOTICE 'Exporting staging tables to S3 %', s3_bucket;
 
     PERFORM aws_s3.query_export_to_s3(
-        'SELECT customer_id, first_name, last_name FROM oltp.customer',
+        'SELECT customer_id, first_name, last_name FROM oltp.customer ORDER BY customer_id',
         s3_bucket,
         'customers.csv',
         aws_region,
@@ -78,7 +79,7 @@ CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR DEFAULT :s3_buc
     );
 
     PERFORM aws_s3.query_export_to_s3(
-        'SELECT film_id, title, release_year, rating FROM film',
+        'SELECT film_id, title, release_year, rating FROM film ORDER BY film_id',
         s3_bucket,
         'films.csv',
         aws_region,
@@ -86,7 +87,7 @@ CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR DEFAULT :s3_buc
     );
 
     PERFORM aws_s3.query_export_to_s3(
-        'SELECT staff_id, first_name, last_name FROM staff',
+        'SELECT staff_id, first_name, last_name FROM staff ORDER BY staff_id',
         s3_bucket,
         'staff.csv',
         aws_region,

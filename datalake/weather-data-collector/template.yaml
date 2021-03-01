@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  weather-data-collector
+
+  Sample SAM Template for weather-data-collector
+
+Parameters:
+  WeatherApiKey:
+    Type: String
+  GlueEtlScriptS3Path:
+    Type: String
+
+Globals:
+  Function:
+    Timeout: 300
+    AutoPublishAlias: live
+
+Resources:
+  WeatherDataLakeS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: 'tci-weather-data-lake'
+
+  WeatherDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/weather_data/
+      Handler: api.lambda_handler
+      Runtime: python3.8
+      Environment:
+        Variables:
+          WEATHER_API_KEY: !Ref WeatherApiKey
+          BUCKET_NAME: !Ref WeatherDataLakeS3Bucket
+          TABLE_NAME: !Ref WeatherDataTrackingTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WeatherDataTrackingTable
+        - S3CrudPolicy:
+            BucketName: !Ref WeatherDataLakeS3Bucket
+      Events:
+        WeatherDataFetchSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(3 minutes)'
+            Name: 'weather_data_fetch_schedule'
+            Enabled: true
+
+  WeatherDataLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: WeatherDataFunction
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${WeatherDataFunction}"
+      RetentionInDays: 7
+
+  WeatherDataTrackingTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: 'weather_data_tracking'
+      PrimaryKey:
+        Name: location
+        Type: String
+
+  WeatherGlueDefaultIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - glue.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+
+  WeatherGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: "weatherdata"
+        Description: Glue metadata catalog database weather dataset
+
+  RawWeatherGlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: 'rawweather'
+      DatabaseName: !Ref WeatherGlueDatabase
+      Description: Crawls the Raw Weather Data
+      Role: !GetAtt WeatherGlueDefaultIamRole.Arn
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${WeatherDataLakeS3Bucket}/rawweatherdata"
+      Schedule:
+        ScheduleExpression: cron(0 1 * * ? *) # run every day at 1 am
+
+  CleanWeatherGlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: 'cleanweather'
+      DatabaseName: !Ref WeatherGlueDatabase
+      Description: Crawls the Clean Weather Data
+      Role: !GetAtt WeatherGlueDefaultIamRole.Arn
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${WeatherDataLakeS3Bucket}/cleanweather"
+      Schedule:
+        ScheduleExpression: cron(0 2 * * ? *) # run every day at 2 am
+
+  RawWeatherCleanerGlueEtlJob:
+    Type: AWS::Glue::Job
+    DependsOn: RawWeatherGlueCrawler
+    Properties:
+      Description: PySpark Glue job cleans, reformats, and enriches raw Weather Data
+      GlueVersion: 2.0
+      Command:
+        Name: glueetl
+        ScriptLocation: !Ref GlueEtlScriptS3Path
+        PythonVersion: 3
+      MaxCapacity: 10
+      MaxRetries: 2
+      Role: !GetAtt WeatherGlueDefaultIamRole.Arn
+      Timeout: 5
+      DefaultArguments: {
+          "--s3_bucket": !Sub "${WeatherDataLakeS3Bucket}",
+          "--glue_database": !Sub "${WeatherGlueDatabase}",
+          "--rawweather_table": "rawweatherdata",
+          "--cleanweather_table": "cleanweather"
+        }
+
+  RawWeatherCleanerGlueTrigger:
+    Type: AWS::Glue::Trigger
+    DependsOn: RawWeatherCleanerGlueEtlJob
+    Properties:
+      Actions:
+        - JobName: !Ref RawWeatherCleanerGlueEtlJob
+      Description: Initiates Glue PySpark Job that processes the raw weather data
+      Predicate:
+        Conditions:
+          - CrawlerName: !Ref RawWeatherGlueCrawler
+            CrawlState: SUCCEEDED
+            State: SUCCEEDED
+            LogicalOperator: EQUALS
+      Type: CONDITIONAL
+      StartOnCreation: true

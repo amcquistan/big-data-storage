@@ -1,0 +1,7 @@
+
+dbpasswd               = ""
+redshift_subnet_ids    = []
+skip_final_snapshot    = 
+vpc_id                 = ""
+redshift_cidr          = ""
+vpc_security_group_id  = ""
