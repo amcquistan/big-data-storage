@@ -1,5 +1,5 @@
 output "database_url" {
-  value = "postgresql://${var.redshift_dbuser}:${var.redshift_dbpasswd}@${aws_redshift_cluster.redshift.endpoint}:${aws_redshift_cluster.redshift.port}/${var.redshift_dbname}"
+  value = "postgresql://${var.redshift_dbuser}:${var.redshift_dbpasswd}@${aws_redshift_cluster.redshift.endpoint}/${var.redshift_dbname}"
 }
 
 output "s3_bucket" {

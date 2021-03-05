@@ -102,14 +102,41 @@ resource "aws_security_group" "postgres" {
     }
 }
 
+resource "aws_db_subnet_group" "db_subnet" {
+    name     = "aurora-pg-subnet"
+    subnet_ids = [aws_subnet.pub_subnet_one.id, aws_subnet.pub_subnet_two.id]
+}
+
 resource "aws_vpc_endpoint" "s3" {
     vpc_id       = aws_vpc.vpc.id
     service_name = "com.amazonaws.${var.region}.s3"
 }
 
-resource "aws_db_subnet_group" "db_subnet" {
-    name     = "aurora-pg-subnet"
-    subnet_ids = [aws_subnet.pub_subnet_one.id, aws_subnet.pub_subnet_two.id]
+resource "aws_vpc_endpoint_route_table_association" "route_tbl_assoc" {
+  route_table_id  = aws_route_table.pub_route_tbl.id 
+  vpc_endpoint_id = aws_vpc_endpoint.s3.id
+}
+
+resource "aws_iam_role" "rds_s3" {
+    assume_role_policy = jsonencode({
+        Version   = "2012-10-17"
+        Statement = [
+            {
+                Action = "sts:AssumeRole"
+                Effect = "Allow"
+                Sid    = ""
+                Principal = {
+                    Service = "rds.amazonaws.com"
+                }
+            }
+        ]
+    })
+    path         = "/"
+}
+
+resource "aws_iam_role_policy_attachment" "rds_managed_policies" {
+    policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+    role       = aws_iam_role.rds_s3.name
 }
 
 resource "aws_rds_cluster" "postgresql" {
@@ -121,11 +148,20 @@ resource "aws_rds_cluster" "postgresql" {
     master_password                 = var.dbpasswd
     backup_retention_period         = var.backup_retention_period
     preferred_backup_window         = var.preferred_backup_window
-    enabled_cloudwatch_logs_exports = ["postgresql"]
+    enabled_cloudwatch_logs_exports = [ "postgresql" ]
+    # iam_roles                       = [ aws_iam_role.rds_s3.arn ]
     port                            = "5432"
     db_subnet_group_name            = aws_db_subnet_group.db_subnet.name
     vpc_security_group_ids          = [aws_security_group.postgres.id]
     skip_final_snapshot             = var.skip_final_snapshot
+
+    lifecycle {
+        ignore_changes = [ iam_roles ]
+    }
+
+    provisioner "local-exec" {
+        command = "aws rds add-role-to-db-cluster --db-cluster-identifier ${aws_rds_cluster.postgresql.id} --role-arn ${aws_iam_role.rds_s3.arn} --feature-name s3Export --region ${var.region}"
+    }
 }
 
 resource "aws_rds_cluster_instance" "postgresql_instance" {
@@ -140,8 +176,9 @@ resource "aws_rds_cluster_instance" "postgresql_instance" {
     performance_insights_enabled = var.performance_insights_enabled
 }
 
-
-
-
-
+# resource "aws_db_instance_role_association" "s3_export" {
+#     db_instance_identifier = aws_rds_cluster_instance.postgresql_instance.identifier
+#     feature_name           = "s3Export"
+#     role_arn               = aws_iam_role.rds_s3.arn
+# }
 

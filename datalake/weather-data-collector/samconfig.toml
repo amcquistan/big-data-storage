@@ -3,9 +3,10 @@ version = 0.1
 [default.deploy]
 [default.deploy.parameters]
 stack_name = "weather-data-collector"
-s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-10m10nasyur0c"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1vtp5n4e7g2j6"
 s3_prefix = "weather-data-collector"
 region = "us-east-2"
+profile = "intrado_dev"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "WeatherApiKey=\"b942d5ca038846adad450241212102\" GlueEtlScriptS3Path=\"s3://my-demo-glue-scripts/etl_raw_weather_data_cleaner.py\""
+parameter_overrides = "WeatherApiKey=\"b942d5ca038846adad450241212102\" GlueEtlScriptS3Key=\"scripts/etl_raw_weather_data_cleaner.py\""

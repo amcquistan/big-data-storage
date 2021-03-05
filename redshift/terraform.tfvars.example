@@ -1,7 +1,19 @@
+redshift_dbpasswd      = ""
+redshift_dbname        = ""
 
-dbpasswd               = ""
-redshift_subnet_ids    = []
-skip_final_snapshot    = 
+postgres_dbhost        = ""
+postgres_dbport        = ""
+postgres_dbname        = ""
+postgres_dbuser        = ""
+postgres_dbpasswd      = ""
+
+redshift_subnet_ids    = [
+  "",
+  ""
+]
+cluster_type           = ""
+node_count             = 2
+skip_final_snapshot    = true
 vpc_id                 = ""
 redshift_cidr          = ""
 vpc_security_group_id  = ""

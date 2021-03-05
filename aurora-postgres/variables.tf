@@ -27,10 +27,10 @@ variable "engine_version" {
     default = "11.9"
 }
 variable "backup_retention_period" {
-    default = 0
+    default = 1
 }
 variable "preferred_backup_window" {
-    default = "05:00-07:00"
+    default = "03:00-05:00"
 }
 variable "publicly_accessible" {
     default = true

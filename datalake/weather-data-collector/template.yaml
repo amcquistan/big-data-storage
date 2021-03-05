@@ -8,8 +8,9 @@ Description: >
 Parameters:
   WeatherApiKey:
     Type: String
-  GlueEtlScriptS3Path:
+  GlueEtlScriptS3Key:
     Type: String
+    Default: "scripts/etl_raw_weather_data_cleaner.py"
 
 Globals:
   Function:
@@ -20,8 +21,6 @@ Resources:
   WeatherDataLakeS3Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
-    Properties:
-      BucketName: 'tci-weather-data-lake'
 
   WeatherDataFunction:
     Type: AWS::Serverless::Function
@@ -121,7 +120,7 @@ Resources:
       GlueVersion: 2.0
       Command:
         Name: glueetl
-        ScriptLocation: !Ref GlueEtlScriptS3Path
+        ScriptLocation: !Sub "${WeatherDataLakeS3Bucket}/GlueEtlScriptS3Key"
         PythonVersion: 3
       MaxCapacity: 10
       MaxRetries: 2
@@ -149,3 +148,11 @@ Resources:
             LogicalOperator: EQUALS
       Type: CONDITIONAL
       StartOnCreation: true
+
+Outputs:
+  WeatherDataLakeS3Bucket:
+    Value: !Ref WeatherDataLakeS3Bucket
+  GlueEtlScriptS3Url:
+    Value: !Sub "${WeatherDataLakeS3Bucket}/${GlueEtlScriptS3Key}"
+
+

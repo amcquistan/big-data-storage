@@ -95,7 +95,7 @@ CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR, aws_region VAR
     );
 
     PERFORM aws_s3.query_export_to_s3(
-        'SELECT oltp.get_date_dim()',
+        'SELECT * FROM oltp.get_date_dim()',
         s3_bucket,
         'dates.csv',
         aws_region,
@@ -103,7 +103,7 @@ CREATE PROCEDURE oltp.export_s3_staging_tables(s3_bucket VARCHAR, aws_region VAR
     );
 
     PERFORM aws_s3.query_export_to_s3(
-        'SELECT oltp.get_sales_facts()',
+        'SELECT * FROM oltp.get_sales_facts()',
         s3_bucket,
         'sales_facts.csv',
         aws_region,

@@ -106,28 +106,25 @@ resource "aws_iam_role_policy_attachment" "glue_managed_policies" {
     role       = aws_iam_role.glue_default.name
 }
 
-resource "aws_glue_connection" "glue_connection" {
-  count           = length(var.redshift_subnet_ids)
-  name            = "glue-vpc-connection-${count.index}"
-  connection_type = "NETWORK"
+# resource "aws_glue_connection" "glue_connection" {
+#   count           = length(var.redshift_subnet_ids)
+#   name            = "glue-vpc-connection-${count.index}"
+#   connection_type = "NETWORK"
 
-  connection_properties = {
-    connection_type = "NETWORK"
-  }
+#   connection_properties = {
+#     connection_type = "NETWORK"
+#   }
 
-  physical_connection_requirements {
-    availability_zone      = "${var.region}${local.az_suffixes[count.index]}"
-    security_group_id_list = [ var.vpc_security_group_id ]
-    subnet_id              = var.redshift_subnet_ids[count.index]
-  }
-}
+#   physical_connection_requirements {
+#     availability_zone      = "${var.region}${local.az_suffixes[count.index]}"
+#     security_group_id_list = [ var.vpc_security_group_id ]
+#     subnet_id              = var.redshift_subnet_ids[count.index]
+#   }
+# }
 
 resource "aws_s3_bucket" "glue_bucket" {
     bucket_prefix = "glue-etl"
     acl           = "private"
-    versioning {
-        enabled = true
-    }
 }
 
 
@@ -140,7 +137,7 @@ resource "aws_s3_bucket_object" "etl_raw_events" {
 }
 
 resource "aws_glue_job" "etl" {
-    depends_on = [ aws_s3_bucket.glue_bucket, aws_iam_role.glue_default, aws_glue_connection.glue_connection ]
+    depends_on = [ aws_s3_bucket.glue_bucket, aws_iam_role.glue_default ]
     role_arn          = aws_iam_role.glue_default.arn
     name              = "postgres-to-redshift-etl"
     glue_version      = "1.0"
@@ -149,24 +146,21 @@ resource "aws_glue_job" "etl" {
     timeout           = 10
     default_arguments = {
         "--s3_bucket"                       = aws_s3_bucket.glue_bucket.id
+        "--aws_region"                      = var.region
+        "--iam_role"                        = aws_iam_role.redshift.arn
         "--redshift_dbname"                 = var.redshift_dbname
         "--redshift_dbhost"                 = aws_redshift_cluster.redshift.endpoint
-        "--redshift_dbport"                 = aws_redshift_cluster.redshift.port
         "--redshift_dbuser"                 = var.redshift_dbuser
         "--redshift_dbpasswd"               = var.redshift_dbpasswd
         "--postgres_dbname"                 = var.postgres_dbname
         "--postgres_dbhost"                 = var.postgres_dbhost
-        "--postgres_dbport"                 = var.postgres_dbport
         "--postgres_dbuser"                 = var.postgres_dbuser
         "--postgres_dbpasswd"               = var.postgres_dbpasswd
     }
 
-    # connections = [ for suffix in local.az_suffixes : aws_glue_connection.glue_connection[index(local.az_suffixes, suffix)].id ]
-    connections = [ for conn in aws_glue_connection.glue_connection : conn.id ]
-
     command {
       name            = "pythonshell"
-      script_location = "${aws_s3_bucket.glue_bucket.id}/${var.etl_script_s3_key}"
+      script_location = "s3://${aws_s3_bucket.glue_bucket.id}/${var.etl_script_s3_key}"
       python_version  = "3"
     }
 }
